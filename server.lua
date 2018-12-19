@@ -1,3 +1,5 @@
+-- Copyright (c) Björn Andersson
+
 package.path  = package.path..";.\\LuaSocket\\?.lua"
 package.cpath = package.cpath..";.\\LuaSocket\\?.dll"
   
@@ -7,13 +9,12 @@ local client
 local logf 
 
 local gauges
-local gauge_values = {}
 local gauge_defs
 local clickables
 local JSON
 local seen={}
-local subscribed_gauges = {}
 local ready = false
+local clients = {}
 
 local CLASS_NULL = 0
 local CLASS_BTN = 1
@@ -21,6 +22,88 @@ local CLASS_TUMB = 2
 local CLASS_SNGBTN = 3
 local CLASS_LEV = 4
 local CLASS_MOVABLE_LEV = 5
+
+
+function LuaExportStart()
+	logf = io.open(lfs.writedir().."/Logs/dcs-master.log", "w")
+	logmsg("DCS Master started")
+	local self = LoGetSelfData()
+	if not self then
+		logmsg("No SelfData, exiting")
+		return
+	end
+	logmsg("Current aircraft is "..self.Name)
+
+	--logmsg(lfs.currentdir())
+	server = socket.bind("*", 8888)
+	server:settimeout(0)
+	gauges = GetDevice(0)
+	JSON = loadfile("Scripts/JSON.lua")()
+	if read_cockpit(self.Name) then
+		logmsg("Succesfully loaded cockpit info")
+		ready = true
+	else
+		logmsg("Failed to load cockpit info")
+	end
+end
+
+function LuaExportStop()
+	if client then
+		client:close()
+		client = nil
+	end
+	logmsg("DCS Master stopped")
+end
+
+function LuaExportBeforeNextFrame()
+	if not ready then return end
+
+	for _, client in pairs(clients) do
+		local data = client.socket:receive()
+		if data then
+			logmsg("Received: "..data)
+			-- FIX: split on newline
+			-- FIX: check length
+			local cmd = data:sub(1, 1):lower()
+			if cmd == 'b' then
+				handle_button(client, data)
+				return
+			end
+			if cmd == 's' then
+				handle_subscribe(client, data)
+				return
+			end
+			logmsg(string.format("Unknown command '%s', cmd"))
+			return
+			--reply = assert(loadstring("return "..data))()
+			--local s = string.format("%s\n", reply)
+			--send_to_client(s)
+			--GetDevice(31):performClickableAction(3008, 0.025)
+			--GetDevice(31):SetCommand(3008, 0.025)
+--			gauges:set_argument_value(191, 0.0)
+--			gauges:update_arguments()
+		end
+	end
+end
+
+--function LuaExportAfterNextFrame()
+function LuaExportActivityNextEvent(t)
+	if not ready then return end
+
+	local client_socket = server:accept()
+	if client_socket then
+		local client = new_client(client_socket)
+		clients[client] = client
+		logmsg("Client connected")
+		client_socket:settimeout(0)
+		client_socket:setoption("tcp-nodelay", true)
+	end
+
+	for k, client in pairs(clients) do
+		send_data(client)
+	end
+	return t + 0.1
+end
 
 function dump(t, i)
     seen[t]=true
@@ -43,12 +126,12 @@ end
 function string_split(s)
 	local i = 1
 	local list = {}
-	string.gsub(s, "[^%s]+", function(s) list[i] = s; i = i + 1 end)
+	s:gsub("[^%s]+", function(s) list[i] = s; i = i + 1 end)
 	return list
 end
 
 function logmsg(msg)
-	logf:write(msg.."\r\n")
+	logf:write(string.format("%5.3f %s\r\n", LoGetModelTime(), msg))
 end
 
 function interpolate(x, xx, yy)
@@ -84,7 +167,7 @@ function load_gauges(aircraft)
 	for k, v in pairs(temp_gauges) do
 --		logmsg(k)
 		v.name = k
-		gauge_defs[string.lower(k)] = v
+		gauge_defs[k:lower()] = v
 		if v.arg_number then
 			gauge_defs[v.arg_number] = v
 		end
@@ -102,36 +185,6 @@ function read_cockpit(aircraft)
 end
 
 
-function LuaExportStart()
-	logf = io.open(lfs.writedir().."/Logs/dcs-master.log", "w")
-	logmsg("DCS Master started")
-	local self = LoGetSelfData()
-	if not self then
-		logmsg("No SelfData, exiting")
-		return
-	end
-	logmsg("Current aircraft is "..self.Name)
-
-	--logmsg(lfs.currentdir())
-	server = socket.bind("*", 8888)
-	server:settimeout(0)
-	gauges = GetDevice(0)
-	JSON = loadfile("Scripts/JSON.lua")()
-	if read_cockpit(self.Name) then
-		logmsg("Succesfully loaded cockpit info")
-		ready = true
-	else
-		logmsg("Failed to load cockpit info")
-	end
-end
-
-function LuaExportStop()
-	if client then
-		client:close()
-		client = nil
-	end
-	logmsg("DCS Master stopped")
-end
 
 
 function click_clickable(pos, action, clickable)
@@ -196,14 +249,14 @@ function click_clickable(pos, action, clickable)
 end
 
 function string_strip(s)
-	local m = string.find(s, "%s")
+	local m = s:find("%s")
 	if m then
-		return string.sub(s, m)
+		return s:sub(m)
 	end
 	return s
 end
 
-function handle_subscribe(data)
+function handle_subscribe(client, data)
 	-- get:
 	-- * frequency
 	-- * precission
@@ -215,7 +268,7 @@ function handle_subscribe(data)
 		logmsg("No argument found")
 		return
 	end
-	local gauge_name = string.lower(cmd[2])
+	local gauge_name = cmd[2]:lower()
 	local precission = tonumber(cmd[3])
 	local gauge = gauge_defs[gauge_name]
 	if gauge == nil then
@@ -233,12 +286,12 @@ function handle_subscribe(data)
 		precission = 0
 	end
 	if frequency == 0 then
-		subscribed_gauges[gauge.arg_number] = nil
+		client.subscribed_gauges[gauge.arg_number] = nil
 		logmsg("Unsubscribing from "..gauge_name)
 		return
 	end
 	logmsg("Subscribing to "..gauge_name)
-	subscribed_gauges[gauge.arg_number] = { 
+	client.subscribed_gauges[gauge.arg_number] = { 
 		gauge = gauge,
 		precission = precission,
 		id = ownid,
@@ -247,9 +300,9 @@ function handle_subscribe(data)
 end
 
 function handle_button(data)
-	local pos = string.sub(data, 2, 2)
-	local action = string.sub(data, 3, 3)
-	local clickable = string.sub(data, 5)
+	local pos = data:sub(2, 2)
+	local action = data:sub(3, 3)
+	local clickable = data:sub(5)
 	logmsg(string.format("class: %s, pos: %s, action: %s, clickable: %s",
 		class, pos, action, clickable))
 	pos = tonumber(pos)
@@ -260,37 +313,6 @@ function handle_button(data)
 	click_clickable(pos, action, clickable)
 end
 
-function LuaExportBeforeNextFrame()
-	if not ready then
-		return
-	end
-	if client then
-		local data = client:receive()
-		if data then
-			logmsg("Received: "..data)
-			-- FIX: split on newline
-			-- FIX: check length
-			local cmd = string.lower(string.sub(data, 1, 1))
-			if cmd == 'b' then
-				handle_button(data)
-				return
-			end
-			if cmd == 's' then
-				handle_subscribe(data)
-				return
-			end
-			logmsg(string.format("Unknown command '%s', cmd"))
-			return
-			--reply = assert(loadstring("return "..data))()
-			--local s = string.format("%s\n", reply)
-			--send_to_client(s)
-			--GetDevice(31):performClickableAction(3008, 0.025)
-			--GetDevice(31):SetCommand(3008, 0.025)
---			gauges:set_argument_value(191, 0.0)
---			gauges:update_arguments()
-		end
-	end
-end
 
 
 function round(x, e)
@@ -299,64 +321,56 @@ function round(x, e)
 	return math.floor(x * d) / d
 end
 
-function send_json(send_values, e)
+function send_json(client, send_values)
 	local s = "[1"
 	for gauge, input in pairs(send_values) do
 		local fmt = ", [%s, %."..input[2].."f]"
-		s = s..string.format(fmt, gauge, input[1])
+		s = s..fmt:format(gauge, input[1])
 	end
 	s = s.."]\n"
-	send_to_client(s)
+	send_to_client(client, s)
 end
 
-function send_data()
+function send_data(client)
 	local send_values = {}
 	local has_data = false
-	for arg_number, info in pairs(subscribed_gauges) do
+	for arg_number, info in pairs(client.subscribed_gauges) do
 		local output = gauges:get_argument_value(arg_number)
 		input = round(interpolate(output, info.gauge.output, info.gauge.input), info.precission)
 		--local s = string.format("%s = %.3f", gauge, output)
 		--logmsg(s)	
-		if gauge_values[arg_number] == input then
+		if client.gauge_values[arg_number] == input then
 			break
 		end
-		gauge_values[arg_number] = input
+		client.gauge_values[arg_number] = input
 		send_values[info.id] = { input, info.precission }
 		has_data = true
 --		local s = string.format("%s = %.3f -> %.3f\n", gauge, output, input)
 	end
 	if has_data then
 		-- FIX: optional CBOR
-		send_json(send_values)
+		send_json(client, send_values)
 	end
 end
 
-function send_to_client(s)
+function send_to_client(client, s)
 	if not client then
 		return
 	end
 
-	local res, errmsg, lastbyte = client:send(s)
+	local res, errmsg, lastbyte = client.socket:send(s)
 	if res == nil then
 		logmsg("Client error: "..errmsg)
-		client = nil
+		clients[client] = nil
 	end
 
 end	
 
---function LuaExportAfterNextFrame()
-function LuaExportActivityNextEvent(t)
-	if not ready then
-		return
-	end
-	if client == nil and server then
-		client = server:accept()
-		if client then
-			logmsg("Client connected")
-			client:settimeout(0)
-			client:setoption("tcp-nodelay", true)
-		end
-	end
-	send_data()
-	return t + 0.1
+function new_client(socket)
+	client = {
+		socket = socket,
+		subscribed_gauges = {},
+		gauge_values = {},
+	}
+	return client
 end
