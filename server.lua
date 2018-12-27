@@ -3,18 +3,16 @@
 package.path  = package.path..";.\\LuaSocket\\?.lua"
 package.cpath = package.cpath..";.\\LuaSocket\\?.dll"
   
-local socket = require("socket")
+local socket
 local server
-local client
-local logf 
+local logf 		-- log file
 
-local gauges
-local gauge_defs
-local clickables
+local gauges		-- in-game gauges from GetDevice(0)
+local gauge_defs	-- gague definitions from JSON file
+local clickables	-- clickable definitions from JSON file
 local JSON
-local seen={}
-local ready = false
-local clients = {}
+local ready = false -- did we initialize properly?
+local clients = {} -- connected clients
 
 local CLASS_NULL = 0
 local CLASS_BTN = 1
@@ -23,13 +21,20 @@ local CLASS_SNGBTN = 3
 local CLASS_LEV = 4
 local CLASS_MOVABLE_LEV = 5
 
-local CMD_BTN = 1
-local CMD_CMD = 2
-local CMD_SUB = 3
+local CMD_BTN = 1 -- mouse click or scroll wheel
+local CMD_DEV = 2 -- device command
+local CMD_SUB = 3 -- subscribe to gauge value changes
+-- local DATA_GAUGE = 4 -- Gauge data, in response to subscribe
 
-local BTN_UP = 0
-local BTN_DOWN = 1
-local BTN_SET = 2
+local OPT_SUB_FREQ = 1 -- subscribe frequency
+local OPT_SUB_PREC = 2 -- subscribe precission
+local OPT_SUB_ID = 3   -- subscribe ID
+
+local MOUSE_LEFT = 1
+local MOUSE_RIGHT = 2
+local BTN_UP = 0   -- Release mouse button or scroll up
+local BTN_DOWN = 1 -- Click mouse button or scroll down
+local BTN_SET = 2  -- Direct set clickable or device command
 
 function LuaExportStart()
 	logf = io.open(lfs.writedir().."/Logs/dcs-master.log", "w")
@@ -42,6 +47,7 @@ function LuaExportStart()
 	logmsg("Current aircraft is "..self.Name)
 
 	--logmsg(lfs.currentdir())
+	socket = require("socket")
 	server = socket.bind("*", 8888)
 	server:settimeout(0)
 	gauges = GetDevice(0)
@@ -74,23 +80,22 @@ function LuaExportBeforeNextFrame()
 			local cmd = JSON:decode(data)
 			if #cmd == 0 then
 				logmsg("Data contains no command")
-				return
+				break
 			end
 			local arg1 = cmd[1]
 			if type(arg1) ~= "number" then
 				logmsg("Command must be number")
-				return
+				break
 			end
 			if arg1 == CMD_BTN then
 				handle_button(client, cmd)
-				return
+				break
 			end
 			if arg1 == CMD_SUB then
 				handle_subscribe(client, cmd)
-				return
+				break
 			end
-			logmsg(string.format("Unknown command '%s'", arg1))
-			return
+			logmsg(string.format("Unknown command '%d'", arg1))
 		end
 	end
 end
@@ -111,25 +116,6 @@ function LuaExportAfterNextFrame()
 	for k, client in pairs(clients) do
 		send_data(client)
 	end
---	return t + 0.1
-end
-
-function dump(t, i)
-    seen[t]=true
-    local s={}
-	local n=0
-	for k in pairs(t) do
-		n=n+1 s[n]=k
-	end
-	table.sort(s)
-	for k,v in ipairs(s) do
-		-- print(v)
-		logf:write(string.format("%s\t%s\n", i, v))
-		v=t[v]
-		if type(v)=="table" and not seen[v] then
-			dump(v, i.."\t")
-		end
-	end
 end
 
 function string_split(s)
@@ -143,17 +129,31 @@ function logmsg(msg)
 	logf:write(string.format("%8.3f %s\r\n", LoGetModelTime(), msg))
 end
 
+-- Interpolate x between the points given in xx and yy, to get y
+--
+-- xx and yy must be equally long lists, and xx must be in increasing order.
+-- The function finds the two points in xx where x fits between and then interpolates
+-- the values x to get y, the return value
+--
+-- points in xx where 
+-- x: The point we want to interpolate
+-- xx: A list of x values
+-- yy: The corresponding list of y values for xx
+--
+-- Returns: y, the interpolated value
 function interpolate(x, xx, yy)
-	-- FIX: handle reverse order
+	-- FIX: handle reverse order.
+	--      If the list is longer than two values and in decreasing
+    --      order, then this function will give an invalid result	
 	if x == nil then return nil end
 
 	local i
-
+	-- If the list only contains a pair, then we have the points directly
 	if #xx == 2 then
 		i = 2
 	else
 		for j, v in ipairs(xx) do
-			if x <= v then
+			if j > 1 and x <= v then
 				i = j
 				break
 			end
@@ -175,7 +175,7 @@ end
 function load_gauges(aircraft)
 	local temp_gauges = read_json(lfs.writedir().."/Scripts/dcs-master/aircraft/"..aircraft.."/gauges.json")
 	if not temp_gauges then
-		logmsg("Failed to read gauges")
+		logmsg("Failed to read gauges for "..aircraft)
 		return false
 	end
 	gauge_defs = {}
@@ -193,7 +193,7 @@ end
 function load_clickables(aircraft)
 	local temp_clickables = read_json(lfs.writedir().."/Scripts/dcs-master/aircraft/"..aircraft.."/clickables.json")
 	if not temp_clickables then
-		logmsg("Failed to read clickables")
+		logmsg("Failed to read clickables for "..aircraft)
 		return false
 	end
 	clickables = {}
@@ -234,13 +234,25 @@ function scroll_clickable(action, clickable, value)
 	end
 end
 
--- pos: 1 (left click) or 2 (right click)
+
+function round(x, n)
+    local n = math.pow(10, n or 0)
+    local x = x * n
+    if x >= 0 then
+		x = math.floor(x + 0.5)
+	else
+		x = math.ceil(x - 0.5)
+	end
+    return x / n
+end
+
+-- pos: MOUSE_LEFT or MOUSE_RIGHT
 -- action: BTN_UP, BTN_DOWN, BTN_SET
 -- clickable: Name of clickable
 -- value: Must be set if action == BTN_SET
 function click_clickable(pos, action, clickable, value)
 
-	if pos < 1 or pos > 2 then
+	if pos ~= MOUSE_LEFT and pos ~= MOUSE_RIGHT then
 		logmsg("Only button 1 or 2 allowed, "..pos.." given")
 		return
 	end
@@ -295,8 +307,12 @@ function click_clickable(pos, action, clickable, value)
 	-- TUMB down
 	logmsg(string.format("device: %d, action: %d, arg_value: %d", i.device, i.action[pos], i.arg_value[pos]))
 	local v = gauges:get_argument_value(i.arg[pos])
-	logmsg("current: "..v)
+
 	local newval = v + i.arg_value[pos]
+	-- Fix rounding errors in floats
+	-- Maybe we should round v instead?
+	newval = round(newval, 3)
+	logmsg("current: "..v..", adding: "..i.arg_value[pos]..", newval: "..newval)
 	if i.cycle == false and (newval < i.arg_lim[pos][1] or newval > i.arg_lim[pos][2]) then
 		logmsg("New val outside limits")
 		return
@@ -307,21 +323,17 @@ function click_clickable(pos, action, clickable, value)
 	elseif newval > i.arg_lim[pos][2] then
 		logmsg("Cycling value")
 		newval = i.arg_lim[pos][1]
-	end
-	
+	end	
 	logmsg("Setting new value "..newval)
 	GetDevice(i.device):performClickableAction(i.action[pos], newval)
 	logmsg("Done")
 end
 
-function string_strip(s)
-	local m = s:find("%s")
-	if m then
-		return s:sub(m)
-	end
-	return s
-end
 
+-- client: 
+-- cmd: [ 3, gauge_name, { freq=value, prec=value, id=value }] 
+-- FIX: change to list of gauges, i.e:
+--   [ 3, [gauge_name, { freq=value, prec=value, id=value }], [ gauge_name ...] ]   
 function handle_subscribe(client, cmd)
 	-- get:
 	-- * frequency
@@ -372,6 +384,13 @@ function handle_subscribe(client, cmd)
 	}
 end
 
+-- cmd: [ 1, pos, action, clickable, value ]
+--   where:
+--   - pos: 1 = left button, 2 = right button
+--   - action: 0/BTN_UP, 1/BTN_DOWN, 2/BTN_SET
+--   - clickable: name of clickable
+--   - value: for BTN_SET
+
 function handle_button(client, cmd)
 	if #cmd < 4 then
 		logmsg("Not enough arguments to handle clickable")
@@ -401,19 +420,11 @@ function handle_button(client, cmd)
 	click_clickable(pos, action, clickable, value)
 end
 
-
-
-function round(x, e)
-	if x == nil then return nil end
-	local d = math.pow(10, e)
-	return math.floor(x * d) / d
-end
-
 function send_json(client, gauges)
-	local s = "[1"
+	local s = "["..CMD_SUB
 	for _, gauge in pairs(gauges) do
-		local fmt = ", [%s, %."..gauge.precission.."f]"
-		s = s..fmt:format(gauge.id, gauge.gauge_value)
+		local fmt = "%s,[%s,%."..gauge.precission.."f]"
+		s = fmt:format(s, gauge.id, gauge.gauge_value)
 	end
 	s = s.."]\n"
 	send_to_client(client, s)
