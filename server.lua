@@ -7,8 +7,9 @@ local socket
 local server
 local logf 		-- log file
 
+local aircraft
 local gauges		-- in-game gauges from GetDevice(0)
-local gauge_defs	-- gague definitions from JSON file
+local gauge_defs	-- gauge definitions from JSON file
 local clickables	-- clickable definitions from JSON file
 local JSON
 local ready = false -- did we initialize properly?
@@ -21,6 +22,7 @@ local CLASS_SNGBTN = 3
 local CLASS_LEV = 4
 local CLASS_MOVABLE_LEV = 5
 
+local CMD_AIRCRAFT = 0
 local CMD_BTN = 1 -- mouse click or scroll wheel
 local CMD_DEV = 2 -- device command
 local CMD_SUB = 3 -- subscribe to gauge value changes
@@ -44,6 +46,7 @@ function LuaExportStart()
 		logmsg("No SelfData, exiting")
 		return
 	end
+	aircraft = self.Name
 	logmsg("Current aircraft is "..self.Name)
 
 	--logmsg(lfs.currentdir())
@@ -111,8 +114,8 @@ function LuaExportAfterNextFrame()
 		logmsg("Client connected")
 		client_socket:settimeout(0)
 		client_socket:setoption("tcp-nodelay", true)
+		send_to_client(client, "[0, \""..aircraft.."\"]\n")
 	end
-
 	for k, client in pairs(clients) do
 		send_data(client)
 	end
@@ -434,17 +437,15 @@ function send_data(client)
 	local send_gauges = {}
 	local t = LoGetModelTime()
 	for arg_number, gauge in pairs(client.subscribed_gauges) do
-		if gauge.send_time and gauge.send_time + gauge.period >= t then
-			break
+		if not gauge.send_time or t > gauge.send_time + gauge.period then
+			local output = gauges:get_argument_value(arg_number)
+			input = round(interpolate(output, gauge.gauge.output, gauge.gauge.input), gauge.precission)
+			if gauge.gauge_value ~= input then
+				gauge.gauge_value = input
+				gauge.send_time = t
+				send_gauges[#send_gauges+1] = gauge
+			end
 		end
-		local output = gauges:get_argument_value(arg_number)
-		input = round(interpolate(output, gauge.gauge.output, gauge.gauge.input), gauge.precission)
-		if gauge.gauge_value == input then
-			break
-		end
-		gauge.gauge_value = input
-		gauge.send_time = t
-		send_gauges[#send_gauges+1] = gauge
 	end
 	if #send_gauges > 0 then
 		-- FIX: optional CBOR
