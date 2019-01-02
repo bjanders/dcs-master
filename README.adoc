@@ -31,6 +31,7 @@ Aircraft cockspits in DCS are described in the DCS installation folder
 `Mods\aircraft\<aircraft name>\Cockpit\Scripts` folder.
 
 The cockpits consist of the following elements:
+
 Devices::
 The devices of the aircraft. Taking the F-18 as an example, separate devices are the electronic equipment control (UFC),
  the armament computer and the environmental control system. The devices are listed in the `devices.lua` file.
