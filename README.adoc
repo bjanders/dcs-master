@@ -5,12 +5,13 @@ https://www.digitalcombatsimulator.com[Digital Combat Simulator] that provides a
 socket through which aircraft gauge data and other information is exported and
 through which aircraft instruments and controls can be controlled. This implementation
 aims to achieve the following:
+
 * It should be easy to add support for new aircraft without exstensive coding. Most of the
   gauge (game output) and controls (input) are already described in the DCS game files in a structed
   machine readable format. This information is utilized as much as possible to avoid manual
   programming of the same information.
 * A simple to use network protocal that can easily be integrated with various client software.
-  This is achieved by sending all data as https://json.org[JSON). If a more compact data format
+  This is achieved by sending all data as https://json.org[JSON]. If a more compact data format
   is needed, then support for http://cbor.io[CBOR] can easily be added, since JSON can be encoded
   as CBOR.
 * Avoid sending more data than needed. This is achieved by allowing the client to request which
