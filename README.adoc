@@ -1,0 +1,76 @@
+= dcs-master - Digital Combat Simulator cockpit integration server
+
+dcs-master is a plugin to 
+https://www.digitalcombatsimulator.com[Digital Combat Simulator] that provides a network
+socket through which aircraft gauge data and other information is exported and
+through which aircraft instruments and controls can be controlled. This implementation
+aims to achieve the following:
+* It should be easy to add support for new aircraft without exstensive coding. Most of the
+  gauge (game output) and controls (input) are already described in the DCS game files in a structed
+  machine readable format. This information is utilized as much as possible to avoid manual
+  programming of the same information.
+* A simple to use network protocal that can easily be integrated with various client software.
+  This is achieved by sending all data as https://json.org[JSON). If a more compact data format
+  is needed, then support for http://cbor.io[CBOR] can easily be added, since JSON can be encoded
+  as CBOR.
+* Avoid sending more data than needed. This is achieved by allowing the client to request which
+  parameters should be exported, at what maximum frequency and with which precission (per gauge).
+  Data is only
+  sent when the information changes at the requested precission. For example, the indicated
+  airspeed (IAS) is within the game a floating point number that in practise changes for each
+  rendered frame in the game. In most cases, it is sufficient for the client software to know
+  the IAS wihout decimals, for example, at the resolution of 1 km/h or 1 knot. If the IAS stays
+  with that one km/h then an update of the IAS is not sent to the client.
+* Keep the server side implementation fairly simple.
+
+== DCS cockpit information
+
+Aircraft cockspits in DCS are described in the DCS installation folder 
+(typically `C:\Program Files\Eagle Dynamics\DCS World\`) in the 
+`Mods\aircraft\<aircraft name>\Cockpit\Scripts` folder.
+
+The cockpits consist of the following elements:
+Devices::
+The devices of the aircraft. Taking the F-18 as an example, separate devices are the electronic equipment control (UFC),
+ the armament computer and the environmental control system. The devices are listed in the `devices.lua` file.
+Commands::
+The _devices_ are controlled via _commands_. Each device typically has several
+commands. These represent the buttons and switches
+on the devices. For example, the UFC has a number keyboard and several other
+buttons. Each button is a command. The commands are listed in the `command_defs.lua` file.
+The main panel::
+The main panel is a also a device, but is special, in that it contains all
+the gauge and other output information. This includes the position of knobs
+and switches. There are no  commands associated with the main panel devices.
+The main panel gauges are listed in the `mainpanel_init.lua` file which also
+includes the `MainPanel\lamps.lua` file where on/off style indicators are listed. 
+ 
+Devices and commands are numbered. The main panel is always device 0. So we have this structure:
+
+* Devices
+** Device 0: Main panel
+*** Gauge 1
+*** Gauge 2
+*** Gauge n
+** Device 1
+*** Command 1
+*** Command 2
+*** Command n
+** Device n
+*** Command 1
+*** ...
+
+While playing the game, the commands can be executed by clicking and scrolling with the mouse on the controls. For example, left
+clicking on a control might execute one command on a device, while right clicking on the same control might execute
+another command on another device while scolling might execute a third command. The clickable elements are desribed in
+`clickabledata.lua`.
+
+Internally to the game the status of all gauges and commands are represented
+as floating point values between -1.0 and 1.0 inclusive.
+
+== The Protocol
+
+== Intstallation and Usage
+
+== How to Add Support for New Aircraft
+
