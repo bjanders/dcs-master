@@ -10,6 +10,17 @@ local logf 		-- log file
 local aircraft
 local gauges		-- in-game gauges from GetDevice(0)
 local gauge_defs	-- gauge definitions from JSON file
+-- gauge_defs maps gauge names and numbers to gauge definitions. The
+--		defintions are loaded from aircraft specifc JSON files.
+-- A gauge definition is a table with at least the following fields:
+-- * arg_number: The number used in the DCS call
+--		GetDevice(0):get_argument_value(arg_number)
+-- * input: A range of values that is input to the visible gauge
+-- * output: A range of values that is output from DCS. These values are
+--		always within the range [-1.0 1.0] inclusive. The output is mapped
+--		to the input through interpolation. See the interpolate() function.
+-- * controller: Not used in this implementation
+
 local clickables	-- clickable definitions from JSON file
 local JSON
 local ready = false -- did we initialize properly?
@@ -26,14 +37,11 @@ local CMD_AIRCRAFT = 0
 local CMD_BTN = 1 -- mouse click or scroll wheel
 local CMD_DEV = 2 -- device command
 local CMD_SUB = 3 -- subscribe to gauge value changes
--- local DATA_GAUGE = 4 -- Gauge data, in response to subscribe
 
-local OPT_SUB_FREQ = 1 -- subscribe frequency
-local OPT_SUB_PREC = 2 -- subscribe precission
-local OPT_SUB_ID = 3   -- subscribe ID
 
 local MOUSE_LEFT = 1
 local MOUSE_RIGHT = 2
+local MOUSE_SCROLL = 3
 local BTN_UP = 0   -- Release mouse button or scroll up
 local BTN_DOWN = 1 -- Click mouse button or scroll down
 local BTN_SET = 2  -- Direct set clickable or device command
@@ -48,7 +56,6 @@ function LuaExportStart()
 	end
 	aircraft = self.Name
 	logmsg("Current aircraft is "..self.Name)
-
 	--logmsg(lfs.currentdir())
 	socket = require("socket")
 	server = socket.bind("*", 8888)
@@ -334,9 +341,9 @@ end
 
 
 -- client: 
--- cmd: [ 3, gauge_name, { freq=value, prec=value, id=value }] 
--- FIX: change to list of gauges, i.e:
---   [ 3, [gauge_name, { freq=value, prec=value, id=value }], [ gauge_name ...] ]   
+-- cmd: [ 3, gauge_name, id, { f=value, p=value }] 
+-- FIX: allow list of gauges as well, i.e:
+--   [ 3, [gauge_name, id { f=value, p=value }], [ gauge_name ...] ]   
 function handle_subscribe(client, cmd)
 	-- get:
 	-- * frequency
@@ -354,23 +361,30 @@ function handle_subscribe(client, cmd)
 	local gauge = gauge_defs[gauge_name]
 	if gauge == nil then
 		logmsg("Found no gauge named "..gauge_name)
-		return
+		local n = tonumber(gauge_name)
+		-- Dynamically create a gaauge with a one to one mapping
+		if n == nil then
+			return
+		end
+		gauge = {}
+		gauge.arg_number = n
+		gauge.input = {-1.0, 1.0}
+		gauge.output = {-1.0, 1.0}
+		gauge_defs[n] = gauge
+		logmsg("Dynamically created gauge "..n)
 	end
 	if gauge.arg_number == nil then
 		logmsg("No arg_number for arg "..gauge_name)
 		return
 	end
-	local options = cmd[3]
-	local opt_id = gauge.arg_number
+	local opt_id = tonumber(cmd[3])
+	local options = cmd[4]
 	if options then
-		if options.freq then
-			opt_freq = tonumber(options.freq)
+		if options.f then
+			opt_freq = tonumber(options.f)
 		end
-		if options.prec then
-			opt_prec = tonumber(options.prec)
-		end
-		if options.id then
-			opt_id = options.id
+		if options.p then
+			opt_prec = tonumber(options.p)
 		end
 		if opt_freq == 0 then
 			client.subscribed_gauges[gauge.arg_number] = nil
