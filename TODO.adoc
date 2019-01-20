@@ -1,11 +1,10 @@
 = TODO
 
-* Support for the mouse scroll wheel actions
-* Support direct commands (i.e. not via clickables)
 * Hook in the Export() functions so that other plugins can be used at 
   the same time
 * Add JSON files for more aircraft
 * Complete the documentation
+* Support for text displays (indications)
 
 == Low priority
 

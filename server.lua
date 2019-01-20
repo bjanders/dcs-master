@@ -37,6 +37,8 @@ local CLASS_MOVABLE_LEV = 5
 local CMD_AIRCRAFT = 0
 local CMD_DEV = 1 -- device command
 local CMD_SUB = 2 -- subscribe to gauge value changes
+local CMD_SUBIND = 3 -- subscribe to indicators
+local CMD_LISTIND = 4
 
 
 function LuaExportStart()
@@ -92,7 +94,11 @@ function LuaExportBeforeNextFrame()
 					handle_device(client, cmd)
 				elseif arg1 == CMD_SUB then
 					handle_subscribe(client, cmd)
-				else
+				elseif arg1 == CMD_SUBIND then
+					handle_subscribe_indicator(client, cmd)
+				elseif arg1 == CMD_LISTIND then
+					handle_list_indicators(client, cmd)
+				else	
 					logmsg(string.format("Unknown command '%d'", arg1))
 				end
 				break
@@ -124,6 +130,26 @@ function string_split(s)
 	local list = {}
 	s:gsub("[^%s]+", function(s) list[i] = s; i = i + 1 end)
 	return list
+end
+
+
+function lines_to_list(s)
+	local i = 1
+	local list = {}
+	s:gsub("(.-)\n", function(s) list[i] = s; i = i + 1 end)
+	return list
+end
+
+function split_lines(s)
+	if s:sub(-1)~="\n" then s=s.."\n" end
+	return s:gmatch("(.-)\n")
+end
+
+
+function print_lines(t)
+	for i, s in ipairs(t) do
+		print(i, s)
+	end
 end
 
 function logmsg(msg)
@@ -277,9 +303,9 @@ end
 
 
 -- client: 
--- cmd: [ 3, gauge_name, id, { f=value, p=value }] 
+-- cmd: [ 2, gauge_name, id, { f=value, p=value }] 
 -- FIX: allow list of gauges as well, i.e:
---   [ 3, [gauge_name, id { f=value, p=value }], [ gauge_name ...] ]   
+--   [ 2, [gauge_name, id { f=value, p=value }], [ gauge_name ...] ]   
 function handle_subscribe(client, cmd)
 	-- get:
 	-- * frequency
@@ -337,12 +363,154 @@ function handle_subscribe(client, cmd)
 	}
 end
 
+-- client: 
+-- cmd: [ 3, indicator_id, indicator_name, id, { f=value }] 
+function handle_subscribe_indicator(client, cmd)
+	if cmd[2] == nil then
+		logmsg("No indicator ID given")
+		return
+	end
+	local indicator_id = tonumber(cmd[2])
+	-- FIX: look up indicator names
+	if indicator_id == nil then
+		logmsg("Indicator ID must be a number")
+		return
+	end
+	if cmd[3] == nil then
+		logmsg("No indicator name given")
+		return
+	end
+	local indicator_name = cmd[3]:lower()
+	if cmd[4] == nil then
+		logmsg("No own ID given")
+		return
+	end
+	local own_id = tonumber(cmd[4])
+
+	if client.subscribed_indicators[indicator_id] == nil then
+		client.subscribed_indicators[indicator_id] = {}		
+	end
+	client.subscribed_indicators[indicator_id][indicator_name] = {
+		id = own_id
+	}
+end
+
+SEP = "-----------------------------------------" 
+
+function get_indicators(id)
+	logmsg("Getting indicator "..id)
+	local s = list_indication(id)
+	local err = false
+	if not s then
+		return nil
+	end
+	local cur_table = {}
+	local tables = { cur_table }	
+	local strlist = lines_to_list(s)
+	if #strlist == 0 then
+		return nil
+	end
+	local i = 1
+	repeat
+		if strlist[i] == SEP then
+			i = i + 1
+			local name = strlist[i]
+			if strlist[i+2] == "children are {" then
+				new_table = {}
+				tables[#tables+1] = new_table
+				cur_table[name] = new_table
+				cur_table = new_table
+ 				i = i + 3
+			else
+				local value = {}
+				i = i + 1
+				while i <= #strlist and strlist[i] ~= SEP and strlist[i] ~= "}" do
+					-- FIX: there can be tables within string lists,
+					-- see F-18 EW page
+					value[#value+1] = strlist[i]
+					i = i + 1
+				end
+				if #value == 0 then
+					logmsg("No value for ".. name)
+					value = ""
+					err = true
+				elseif #value == 1 then
+					value = value[1] 
+				end
+				if cur_table ~= nil then
+					cur_table[name] = value
+				else
+					err = true
+				end
+			end
+		elseif strlist[i] == "}" then
+			tables[#tables] = nil
+			cur_table = tables[#tables]
+			i = i + 1
+		else
+			err = true
+			logmsg("Unexpected output: "..strlist[i])
+			i = i + 1
+		end
+	until i > #strlist
+	if err then	
+		logmsg(s)
+	end
+	return cur_table
+end
+
+function get_all_indicators()
+	local t = {}
+	local i = 1
+	logmsg("Getting all indicators")
+	local indicators
+	while true do
+		indicators = get_indicators(i)
+		if indicators then
+			t[tostring(i)] = indicators
+		else
+			return t
+		end
+		i = i + 1
+	end
+end
+
+function handle_list_indicators(client, cmd)
+	local indicator_id
+	if cmd[2] ~= nil then
+		indicator_id = tonumber(cmd[2])
+		if indicator_id == nil then
+			logmsg("Indicator ID must be a number")
+			return
+		end
+	end
+	local indicators
+	if indicator_id then
+		indicators = get_indicators(indicator_id)
+	else
+		indicators = get_all_indicators()
+		logmsg("Got "..#indicators.." indicators")
+	end
+	if indicators then
+		send_to_client(client, JSON:encode(indicators).."\n")
+	end
+end
 
 function send_json(client, gauges)
 	local s = "["..CMD_SUB
 	for _, gauge in pairs(gauges) do
 		local fmt = "%s,[%s,%."..gauge.precission.."f]"
 		s = fmt:format(s, gauge.id, gauge.gauge_value)
+	end
+	s = s.."]\n"
+	send_to_client(client, s)
+end
+
+
+function send_indicators_json(client, indicators)
+	local s = "["..CMD_SUBIND
+	for _, ind in pairs(indicators) do
+		s = string.format("%s,[%s,\"%s\"]", s, ind.id, ind.value)
 	end
 	s = s.."]\n"
 	send_to_client(client, s)
@@ -366,7 +534,30 @@ function send_data(client)
 		-- FIX: optional CBOR
 		send_json(client, send_gauges)
 	end
+	local send_indicators = {}
+	for indicator_id, indicator_names in pairs(client.subscribed_indicators) do
+		local data = list_indication(indicator_id)
+		if data then
+			local datalines = lines_to_list(data)
+			for i = 1, #datalines do
+				local ind = datalines[i]
+				local sub_ind = indicator_names[ind:lower()]
+				if sub_ind then
+					i = i + 1
+					ind_value = datalines[i]
+					if ind_value ~= sub_ind.value then
+						sub_ind.value = ind_value
+						send_indicators[#send_indicators+1] = sub_ind
+					end
+				end
+			end
+		end
+	end
+	if #send_indicators > 0 then
+		send_indicators_json(client, send_indicators)
+	end
 end
+
 
 function send_to_client(client, s)
 	if not client then
@@ -384,7 +575,8 @@ end
 function new_client(socket)
 	client = {
 		socket = socket,
-		subscribed_gauges = {}
+		subscribed_gauges = {},
+		subscribed_indicators = {}
 	}
 	return client
 end
