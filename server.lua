@@ -415,33 +415,19 @@ function get_indicators(id)
 		if strlist[i] == SEP then
 			i = i + 1
 			local name = strlist[i]
-			if strlist[i+2] == "children are {" then
+			i = i + 1
+			local value = {}
+			cur_table[name] = value
+			while i <= #strlist and strlist[i] ~= SEP and strlist[i] ~= "}" and strlist[i] ~= "children are {" do
+				value[#value+1] = strlist[i]
+				i = i + 1
+			end
+			if strlist[i] == "children are {" then
 				new_table = {}
 				tables[#tables+1] = new_table
-				cur_table[name] = new_table
+				value[#value+1] = new_table
 				cur_table = new_table
- 				i = i + 3
-			else
-				local value = {}
-				i = i + 1
-				while i <= #strlist and strlist[i] ~= SEP and strlist[i] ~= "}" do
-					-- FIX: there can be tables within string lists,
-					-- see F-18 EW page
-					value[#value+1] = strlist[i]
-					i = i + 1
-				end
-				if #value == 0 then
-					logmsg("No value for ".. name)
-					value = ""
-					err = true
-				elseif #value == 1 then
-					value = value[1] 
-				end
-				if cur_table ~= nil then
-					cur_table[name] = value
-				else
-					err = true
-				end
+ 				i = i + 1
 			end
 		elseif strlist[i] == "}" then
 			tables[#tables] = nil
