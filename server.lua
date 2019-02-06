@@ -7,6 +7,7 @@ local socket
 local server
 local logf 		-- log file
 
+local selfData
 local aircraft
 local gauges		-- in-game gauges from GetDevice(0)
 local gauge_defs = {}	-- gauge definitions from JSON file
@@ -44,21 +45,11 @@ local CMD_LISTIND = 4
 function LuaExportStart()
 	logf = io.open(lfs.writedir().."/Logs/dcs-master.log", "w")
 	logmsg("DCS Master started")
-	local self = LoGetSelfData()
-	if not self then
-		logmsg("No SelfData, exiting")
-		return
-	end
-	aircraft = self.Name
-	logmsg("Current aircraft is "..self.Name)
 	--logmsg(lfs.currentdir())
 	socket = require("socket")
 	server = socket.bind("*", 8888)
 	server:settimeout(0)
-	gauges = GetDevice(0)
 	JSON = loadfile("Scripts/JSON.lua")()
-	read_cockpit(self.Name)
-	ready = true
 end
 
 function LuaExportStop()
@@ -70,12 +61,30 @@ function LuaExportStop()
 end
 
 function LuaExportBeforeNextFrame()
-	if not ready then return end
+	local self = LoGetSelfData()
+
+	if not self then
+		ready = false
+		return
+	end
+ 
+	if self.Name ~= aircraft then
+		selfData = self
+		aircraft = self.Name
+		logmsg("Current aircraft is "..self.Name)
+		read_cockpit(aircraft)
+		for _, client in pairs(clients) do
+			send_to_client(client, "[0, \""..aircraft.."\"]\n")
+		end
+		ready = true
+	end	
+	gauges = GetDevice(0)
 
 	for _, client in pairs(clients) do
 		local data = client.socket:receive()
 		if data then
-			-- workaround for missing 'continue' statement in Lua
+			-- workaround for missing 'continue' statement in Lua:
+			-- break out of 'while true' to continue 'for' loop
 			while true do
 				logmsg("Received: "..data)
 				-- FIX: split on newline
@@ -118,7 +127,9 @@ function LuaExportAfterNextFrame()
 		logmsg("Client connected")
 		client_socket:settimeout(0)
 		client_socket:setoption("tcp-nodelay", true)
-		send_to_client(client, "[0, \""..aircraft.."\"]\n")
+		if aircraft then
+			send_to_client(client, "[0, \""..aircraft.."\"]\n")
+		end
 	end
 	for k, client in pairs(clients) do
 		send_data(client)
