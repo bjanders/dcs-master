@@ -70,7 +70,7 @@ as floating point values between -1.0 and 1.0 inclusive.
 WARNING: The protocol in the implementation does not currently exactly match the description below, and changes to the protocol are still likely to occur.
 
 The protocol works by sending and receiving JSON arrays. The array must always be terminated by a line feed character. This is to make parsing easier. The JSON arrays are exchanged over a TCP/IP session. By default the DCS master server plugin listens to port 4242, but this can changed in the LUA script. The first element of the JSON array is always the associated command defined by an integer. The general format is:
-[source,json]
+[source]
 ----
 [<command>, <arg1>, <arg2>, ...]
 ----
@@ -86,11 +86,12 @@ Five _commands_ are currently implemented:
 === Command 0: Report currently controlled aircraft
 
 Command 0 is automatically sent by the server to the client:
+
 * Immediately when the client connects if an aircraft is controlled
 * Immediately when the controlled aircraft changes
 
 The format of the command is:
-[source,json]
+[source]
 ----
 [0, "<aircraft>"]
 ----
@@ -106,7 +107,7 @@ For example, when the the F/A-18C is controlled, the following is sent by the se
 
 With command 1 you control devices in the aircraft, like pushing a button, flicking a switch, turning a knob or pulling a lever. The format of the command is:
 
-[source,json]
+[source]
 ----
 [1, <device>, <command>, <value>]
 ----
@@ -160,7 +161,7 @@ Note that gauges are any kind of indicators that can be represented by a numeric
 ==== Client to server
 
 The format of the command is:
-[source,json]
+[source]
 ----
 [2, <gaugename>, <id>, <precision>, <maxfrequency>]
 ----
@@ -181,7 +182,7 @@ Both _<precision>_ and _<maxfrequency>_ are optional, but to set _<maxfrequency>
 ==== Server to client
 
 Format:
-[source,json]
+[source]
 ----
 [2, <id>, <gaugevalue>]
 ----
