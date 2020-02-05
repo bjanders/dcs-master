@@ -67,7 +67,136 @@ as floating point values between -1.0 and 1.0 inclusive.
 
 == The protocol 
 
+WARNING: The protocol in the implementation does not currently exactly match the description below, and changes to the protocol are still likely to occur.
+
+The protocol works by sending and receiving JSON arrays. The array must always be terminated by a line feed character. This is to make parsing easier. The JSON arrays are exchanged over a TCP/IP session. By default the DCS master server plugin listens to port 4242, but this can changed in the LUA script. The first element of the JSON array is always the associated command defined by an integer. The general format is:
+[source,json]
+----
+[<command>, <arg1>, <arg2>, ...]
+----
+
+Five _commands_ are currently implemented:
+
+0:: The server reports the name of the currently controlled aircraft
+1:: The client controls a device
+2:: The client subscribes to gauge value changes, and the server sends gauge values
+3:: The client subscribes to indicators (text output, which cannot be represented as number), and the server sends indicator values
+4:: The client requests a list of all known indicators, and the server responds with the indicators
+
+=== Command 0: Report currently controlled aircraft
+
+Command 0 is automatically sent by the server to the client:
+* Immediately when the client connects if an aircraft is controlled
+* Immediately when the controlled aircraft changes
+
+The format of the command is:
+[source,json]
+----
+[0, "<aircraft>"]
+----
+The aircraft name is always as defined by DCS.
+
+For example, when the the F/A-18C is controlled, the following is sent by the server to the client:
+[source,json]
+----
+[0, "FA-18C_Hornet"]
+----
+
+===  Command 1: Control a device
+
+With command 1 you control devices in the aircraft, like pushing a button, flicking a switch, turning a knob or pulling a lever. The format of the command is:
+
+[source,json]
+----
+[1, <device>, <command>, <value>]
+----
+Where:
+
+<device> and <command>::
+_Device_ and _command_ can either take an integer form or a string form. The integer form always works for any aircraft and for every device and command. This way any aircraft now and in the future can be controlled without any updates to the server software. To find the right device and command numbers, look in the DCS aircraft folder in the `devices.lua` and `command_defs.lua` files. To use the string form, the device and/or command must be defined in the aircraft specific JSON file in the dcs-master folder. To find the correct device and command names, look in this JSON file. The strings are not case sensitive, so you can capitalize them as you see fit. The names used are always as defined by DCS, even if they contain typos (as has happened).
+_<value>_::
+The _value_ is always a floating point value between -1.0 and 1.0 inclusive. The value to send can most often be easily determined:
+
+** On/off switches are 0, 1 and tri-state (up/middle/down) switches are 1, 0, -1.
+** Multi-position rotational knobs are fractional numbers for various the various positions _(Information on how to determine the fractions will be added.)_
+** Encoders are fractional numbers of the amount to turn; positive for clockwise and negative for counter-clockwise 
+** Analog controls can use the whole floating point range
+
+==== Examples
+
+To press and release the TCN button on the UFC in the F/A-18C, send:
+
+[source,json]
+----
+[1, "UFC", "FuncSwTCN", 1]
+[1, "UFC", "FuncSwTCN", 0]
+----
+
+To increase the RADAR altimeter warning position on the right vertical panel in the F/A-18C, send:
+
+[source,json]
+----
+[1, "ID2163A", "ID2163A_SetMinAlt", 0.05]
+----
+
+And to decrease it:
+[source,json]
+----
+[1, "ID2163A", "ID2163A_SetMinAlt", -0.05]
+----
+
+_Example of multi-position switch and other examples will be added._
+
+
+=== Command 2: Subscribe to gauge values
+
+With command 2 you subscribe the changes in the values of gauges, and receive the updated gauge values from the server. An update of the value of the gauge is sent by the server to the client when either of the following conditions occur:
+
+* Immediately after the subscribe command has been sent by the client to the server, so the client gets a starting point
+* When a value changes with the requested precision _and_ no more often than at the requested frequency
+
+Note that gauges are any kind of indicators that can be represented by a numerical value. This includes on/off lights, analog gauges and digitally displayed values. 
+
+==== Client to server
+
+The format of the command is:
+[source,json]
+----
+[2, <gaugename>, <id>, <precision>, <maxfrequency>]
+----
+
+Where:
+
+<gaugename>::
+The _gauge name_ can either take an integer form or a string form. The integer form always works for any aircraft and for every gauge. This way you can receive gauge information for any aircraft now and in the future without any updates to the server software. To use the string form, the device and/or command must be defined in the aircraft specific JSON file in the dcs-master folder. To find the correct device and command names, look in this JSON file. The strings are not case sensitive, so you can capitalize them as you see fit. The names used are always as defined by DCS, even if they contain typos.
+<id>::
+The _ID_ is an arbitrary integer number assigned by the client. This ID will be used the server when sending gauge value updates to the client. The purpose of the ID is to make it easy for the client to implement a lookup array to update the physical gauges. A typical client would start assign IDs starting from 0 and then incrementing by one for each gauge that it has interest in.
+<precision>::
+The _precision_ is an integer number defining with how many decimals precision the client is interested in receiving updates. This has an effect on both the update frequency and the precision in which the value is returned. The default value precision is 0, meaning whole integers. A precision of 1 decimal, means that an update is sent of the value changes by 0.1 or more; A precision of 2, means changes of 0.01 or more and so on. Negative numbers are also allowed. For example -1, means to report changes of 10 or more.
+<maxfrequency>::
+The _maximum frequency_ defines the maximum frequency at which an update will be sent. The default value is 10, i.e., an update is sent _at most_ ten times per second. If the value has not changed by more than the requested _precision_, then an update will not be sent no matter what the _maximum frequency_ is set at.
+
+Both _<precision>_ and _<maxfrequency>_ are optional, but to set _<maxfrequency>_ you must also set _<precision>_. Most often you would keep _<maxfrequency>_ the same for all gauges in your cockpit and only change the _<precision>_ depending on the gauge type.
+
+==== Server to client
+
+Format:
+[source,json]
+----
+[2, <id>, <gaugevalue>]
+----
+
+_Description will come._
+
+
+=== Command 4: Subscribe to indicators
+
+=== Command 5: List all indicators
+
+=== Example session
+
 == Installation and usage
 
 == How to add support for new aircraft
 
+== Related projects
