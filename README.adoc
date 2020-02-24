@@ -196,7 +196,7 @@ Indicators are gauges that and screens that show output that shows text and cann
 hierarchically within DCS. At the highest level are numbers, representing a device
 within the cockpit. The device can several displays. For example, in the Hornet,
 the UFC is device number 6, and the UFC has several displays. For an example of
-all indicators of the Hornet see link:hornetinidicators.json[hornetinidicators.json].
+all indicators of the Hornet see link:hornetindicators.json[hornetindicators.json].
 
 If you don't know the number and name of the indicator you need, you can send 
 command 5, explained later.
@@ -263,7 +263,7 @@ show the number on the scratch pad. The following is sent by the server to the c
 === Command 5: List all indicators
 
 Use this command to get a list of all indicators in the cockpit. See
-link:hornetinidicators.json[hornetinidicators.json] for example of the
+link:hornetindicators.json[hornetindicators.json] for example of the
 output. The actual output is in a more compact form without spaces.
 The example has been formatted for readability.
 
