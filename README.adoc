@@ -67,9 +67,9 @@ as floating point values between -1.0 and 1.0 inclusive.
 
 == The protocol 
 
-WARNING: The protocol in the implementation does not currently exactly match the description below, and changes to the protocol are still likely to occur.
+WARNING: The protocol is not fully finalized yet and changes may still occur.
 
-The protocol works by sending and receiving JSON arrays. The array must always be terminated by a line feed character. This is to make parsing easier. The JSON arrays are exchanged over a TCP/IP session. By default the DCS master server plugin listens to port 4242, but this can changed in the LUA script. The first element of the JSON array is always the associated command defined by an integer. The general format is:
+The protocol works by sending and receiving JSON arrays. The array must always be terminated by a new line character. This is to make parsing easier. The JSON arrays are exchanged over a TCP/IP session. By default the DCS master server plugin listens to port 4242, but this can changed in the LUA script. The first element of the JSON array is always the associated command defined by an integer. The general format is:
 [source]
 ----
 [<command>, <arg1>, <arg2>, ...]
@@ -100,7 +100,7 @@ The aircraft name is always as defined by DCS.
 For example, when the the F/A-18C is controlled, the following is sent by the server to the client:
 [source,json]
 ----
-[0, "FA-18C_Hornet"]
+[0, "FA-18C_hornet"]
 ----
 
 ===  Command 1: Control a device
@@ -114,12 +114,12 @@ With command 1 you control devices in the aircraft, like pushing a button, flick
 Where:
 
 <device> and <command>::
-_Device_ and _command_ can either take an integer form or a string form. The integer form always works for any aircraft and for every device and command. This way any aircraft now and in the future can be controlled without any updates to the server software. To find the right device and command numbers, look in the DCS aircraft folder in the `devices.lua` and `command_defs.lua` files. To use the string form, the device and/or command must be defined in the aircraft specific JSON file in the dcs-master folder. To find the correct device and command names, look in this JSON file. The strings are not case sensitive, so you can capitalize them as you see fit. The names used are always as defined by DCS, even if they contain typos (as has happened).
+_Device_ and _command_ can either take an integer form or a string form. The integer form always works for any aircraft and for every device and command. This way any aircraft now and in the future can be controlled without any updates to the server software. To find the right device and command numbers, look in the DCS aircraft folder in the `devices.lua` and `command_defs.lua` files. To use the string form, the device and/or command must be defined in the aircraft specific JSON file in the dcs-master folder. To find the correct device and command names, look in this JSON file. The strings are not case sensitive, so you can capitalize them as you see fit. The names used are always as defined by DCS, even if they contain typos (as has happened), or if they are non-descriptive like "Button_42".
 _<value>_::
 The _value_ is always a floating point value between -1.0 and 1.0 inclusive. The value to send can most often be easily determined:
 
-** On/off switches are 0, 1 and tri-state (up/middle/down) switches are 1, 0, -1.
-** Multi-position rotational knobs are fractional numbers for various the various positions _(Information on how to determine the fractions will be added.)_
+** On/off switches are 0, 1 and tri-state (down/middle/up) switches are -1, 0, 1.
+** Multi-position rotational knobs are fractional numbers for the various positions _(Information on how to determine the fractions will be added.)_
 ** Encoders are fractional numbers of the amount to turn; positive for clockwise and negative for counter-clockwise 
 ** Analog controls can use the whole floating point range
 
@@ -192,7 +192,89 @@ _Description will come._
 
 === Command 4: Subscribe to indicators
 
+Indicators are gauges that and screens that show output that shows text and cannot be represented by numbers, for example the output on a text display. Indicators grouped
+hierarchically within DCS. At the highest level are numbers, representing a device
+within the cockpit. The device can several displays. For example, in the Hornet,
+the UFC is device number 6, and the UFC has several displays. For an example of
+all indicators of the Hornet see link:hornetinidicators.json[hornetinidicators.json].
+
+If you don't know the number and name of the indicator you need, you can send 
+command 5, explained later.
+
+The format of the command is:
+[source]
+----
+[3, <indicatornumber>, <indicatorname>, <id>]
+----
+
+Where:
+
+<indicator_number>::
+The indicator number of the device.
+
+<indicatorname>::
+The name of the indicator. Although the indicators are in a hierarchy, the 
+indicator name is just the name of the actual indicator, without any intermediates.
+For example the UFC scratch pad displays is on indicator device 6 and the full hierarchy
+is UFC_MainDummy -> UFC_mask -> UFC_ScratchPadNumberDisplay. To get this value, you would
+use an <indicatorname> of "UFC_ScratchPadNumberDisplay"
+
+<id>::
+The _ID_ is an arbitrary integer number assigned by the client. This ID will be used the server when sending gauge value updates to the client. The purpose of the ID is to make it easy for the client to implement a lookup array to update the physical gauges. A typical client would start assign IDs starting from 0 and then incrementing by one for each gauge that it has interest in.
+
+The server will send to the client:
+[source]
+----
+[3, [<id>, <indicatorstring>], [<id>, <indicatorstring>], ...]
+----
+
+Where:
+
+<id>::
+Is the ID given in the subscribe command
+
+<indicatorstring>::
+Is the text displayed on the indicator.
+
+==== Example
+
+The client subscribes to the output of the Hornet UFC scratchpad:
+
+[source]
+----
+[3, 6, "UFC_ScratchPadNumberDisplay"]
+----
+
+Now the player types on the 1, 2, 3, 4, 5, 6, 7 on the number pad of the UFC, which will
+show the number on the scratch pad. The following is sent by the server to the client:
+
+[source]
+----
+[3,[0,"       "]]
+[3,[0,"      1"]]
+[3,[0,"     12"]]
+[3,[0,"    123"]]
+[3,[0,"   1234"]]
+[3,[0,"  12345"]]
+[3,[0," 123456"]]
+[3,[0,"1234567"]]
+----
+
 === Command 5: List all indicators
+
+Use this command to get a list of all indicators in the cockpit. See
+link:hornetinidicators.json[hornetinidicators.json] for example of the
+output. The actual output is in a more compact form without spaces.
+The example has been formatted for readability.
+
+The format of the command is:
+
+[code]
+----
+[5]
+----
+
+See the above example for the format that the server replies with.
 
 === Example session
 
