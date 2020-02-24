@@ -1,10 +1,13 @@
 = TODO
 
-* Hook in the Export() functions so that other plugins can be used at 
-  the same time
 * Add JSON files for more aircraft
 * Complete the documentation
 * Support for text displays (indications)
+* Configuration file with at least the following settings:
+** Default gauge update precision
+** Default gauge max update frequency
+** TCP listen port number
+* Possibility to request raw (not interpolated) gauge values
 
 == Low priority
 

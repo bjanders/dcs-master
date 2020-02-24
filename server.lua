@@ -5,6 +5,11 @@ local LISTEN_PORT = 8888    -- TCP port the server listens to
 local DEFAULT_PREC = 0      -- Default precission for gauges
 local DEFAULT_FREQ = 10      -- Default max frequency for gauges
 
+local PrevLuaExportStart = LuaExportStart
+local PrevLuaExportBeforeNextFrame = LuaExportBeforeNextFrame
+local PrevLuaExportAfterNextFrame = LuaExportAfterNextFrame
+local PrevLuaExportStop = LuaExportStop
+
 package.path  = package.path..";.\\LuaSocket\\?.lua"
 package.cpath = package.cpath..";.\\LuaSocket\\?.dll"
 
@@ -55,6 +60,9 @@ function LuaExportStart()
   server = socket.bind("*", LISTEN_PORT)
   server:settimeout(0)
   JSON = loadfile("Scripts/JSON.lua")()
+  if PrevLuaExportStart then
+    PrevLuaExportStart()
+  end
 end
 
 function LuaExportStop()
@@ -64,6 +72,9 @@ function LuaExportStop()
   end
   logmsg("DCS Master stopped")
   -- FIX: close logf
+  if PrevExportStop then
+    PrevLuaExportStop()
+  end
 end
 
 function LuaExportBeforeNextFrame()
@@ -120,10 +131,12 @@ function LuaExportBeforeNextFrame()
       end
     end
   end
+  if PrevLuaExportBeforeNextFrame then
+    PrevLuaExportBeforeNextFrame()
+  end
 end
 
 function LuaExportAfterNextFrame()
---function LuaExportActivityNextEvent(t)
   if not ready then return end
 
   local client_socket = server:accept()
@@ -139,6 +152,9 @@ function LuaExportAfterNextFrame()
   end
   for k, client in pairs(clients) do
     send_data(client)
+  end
+  if PrevLuaExportAfterNextFrame then
+    PrevLuaExportAfterNextFrame()
   end
 end
 
