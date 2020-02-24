@@ -1,5 +1,10 @@
 -- Copyright (c) Björn Andersson
 
+-- Configurable items
+local LISTEN_PORT = 8888    -- TCP port the server listens to
+local DEFAULT_PREC = 0      -- Default precission for gauges
+local DEFAULT_FREQ = 10	    -- Default max frequency for gauges
+
 package.path  = package.path..";.\\LuaSocket\\?.lua"
 package.cpath = package.cpath..";.\\LuaSocket\\?.dll"
   
@@ -12,14 +17,14 @@ local aircraft
 local gauges		-- in-game gauges from GetDevice(0)
 local gauge_defs = {}	-- gauge definitions from JSON file
 -- gauge_defs maps gauge names and numbers to gauge definitions. The
---		defintions are loaded from aircraft specifc JSON files.
+-- defintions are loaded from aircraft specifc JSON files.
 -- A gauge definition is a table with at least the following fields:
 -- * arg_number: The number used in the DCS call
---		GetDevice(0):get_argument_value(arg_number)
+--   GetDevice(0):get_argument_value(arg_number)
 -- * input: A range of values that is input to the visible gauge
 -- * output: A range of values that is output from DCS. These values are
---		always within the range [-1.0 1.0] inclusive. The output is mapped
---		to the input through interpolation. See the interpolate() function.
+--   always within the range [-1.0 1.0] inclusive. The output is mapped
+--   to the input through interpolation. See the interpolate() function.
 -- * controller: Not used in this implementation
 
 local devices = {} -- device name to number mapping from JSON file
@@ -47,7 +52,7 @@ function LuaExportStart()
 	logmsg("DCS Master started")
 	--logmsg(lfs.currentdir())
 	socket = require("socket")
-	server = socket.bind("*", 8888)
+	server = socket.bind("*", LISTEN_PORT)
 	server:settimeout(0)
 	JSON = loadfile("Scripts/JSON.lua")()
 end
@@ -58,6 +63,7 @@ function LuaExportStop()
 		clients[client] = nil
 	end
 	logmsg("DCS Master stopped")
+	-- FIX: close logf
 end
 
 function LuaExportBeforeNextFrame()
@@ -90,7 +96,7 @@ function LuaExportBeforeNextFrame()
 				-- FIX: split on newline
 				-- FIX: check length
 				local cmd = JSON:decode(data)
-				if #cmd == 0 then
+				if #cmd == 0 or cmd == nil then
 					logmsg("Data contains no command")
 					break
 				end
@@ -314,23 +320,29 @@ end
 
 
 -- client: 
--- cmd: [ 2, gauge_name, id, { f=value, p=value }] 
+-- cmd: [ 2, gauge_name, id, prec, freq ]
+-- 		prec and freq and option 
 -- FIX: allow list of gauges as well, i.e:
---   [ 2, [gauge_name, id { f=value, p=value }], [ gauge_name ...] ]   
+--   [ 2, [gauge_name, id, ... ], [ gauge_name ...] ]   
 function handle_subscribe(client, cmd)
 	-- get:
 	-- * frequency
 	-- * precission
 	-- * own ID
 	local opt_id
-	local opt_freq = 10
-	local opt_prec = 0
+	local opt_prec = DEFAULT_PREC
+	local opt_freq = DEFAULT_FREQ
 
 	if cmd[2] == nil then
 		logmsg("No gauge argument found")
 		return
 	end
-	local gauge_name = cmd[2]:lower()
+	local gauge_name
+	if type(cmd[2]) == "number" then
+		gauge_name = cmd[2]
+	else
+		gauge_name = cmd[2]:lower()
+	end
 	local gauge = gauge_defs[gauge_name]
 	if gauge == nil then
 		logmsg("Found no gauge named "..gauge_name)
@@ -351,20 +363,31 @@ function handle_subscribe(client, cmd)
 		return
 	end
 	local opt_id = tonumber(cmd[3])
-	local options = cmd[4]
-	if options then
-		if options.f then
-			opt_freq = tonumber(options.f)
-		end
-		if options.p then
-			opt_prec = tonumber(options.p)
-		end
-		if opt_freq == 0 then
-			client.subscribed_gauges[gauge.arg_number] = nil
-			logmsg("Unsubscribing from "..gauge_name)
-			return
+	if #cmd > 3 then
+		opt_prec = tonumber(cmd[4])
+		if #cmd > 4 then
+			opt_freq = tonumber(cmd[5])
+			if opt_freq == 0 then
+				client.subscribed_gauges[gauge.arg_number] = nil
+				logmsg("Unsubscribing from "..gauge_name)
+				return
+			end
 		end
 	end
+	-- local options = cmd[4]
+	-- if options then
+	-- 	if options.f then
+	-- 		opt_freq = tonumber(options.f)
+	-- 	end
+	-- 	if options.p then
+	-- 		opt_prec = tonumber(options.p)
+	-- 	end
+	-- 	if opt_freq == 0 then
+	-- 		client.subscribed_gauges[gauge.arg_number] = nil
+	-- 		logmsg("Unsubscribing from "..gauge_name)
+	-- 		return
+	-- 	end
+	-- end
 	logmsg("Subscribing to "..gauge_name)
 	client.subscribed_gauges[gauge.arg_number] = { 
 		gauge = gauge,
@@ -513,6 +536,26 @@ function send_indicators_json(client, indicators)
 	send_to_client(client, s)
 end
 
+function send_speed(client)
+	-- LoGetADIPitchBankYaw()   -- (args - 0, results - 3 (rad))
+	-- LoGetAngleOfAttack() -- (args - 0, results - 1 (rad))
+	-- LoGetAccelerationUnits() -- (args - 0, results - table {x = Nx,y = NY,z = NZ} 1 (G))
+	-- LoGetVerticalVelocity()  -- (args - 0, results - 1(m/s))
+
+	local accel = LoGetAccelerationUnits() -- {x = Nx,y = NY,z = NZ} 1 (G)
+	local vector_vel = LoGetVectorVelocity() -- { x, y, z } vector of self velocity (world axis)
+	local angular_vel = LoGetAngularVelocity() -- { x, y, z } angular velocity euler angles , rad per sec
+	--> calculate angular accelleration
+	-- local s = string.format("[%f, %f, %f] [%f, %f, %f] [%f, %f, %f]\n", 
+	-- 	vector_vel.x, vector_vel.y, vector_vel.z,
+	-- 	angular_vel.x, angular_vel.y, angular_vel.z,
+	-- 	accel.x, accel.y, accel.z])
+	local s = string.format("[%f, %f, %f]\n", 
+		accel.x, accel.y, accel.z)
+	send_to_client(client, s)
+end
+
+
 function send_data(client)
 	local send_gauges = {}
 	local t = LoGetModelTime()
@@ -553,6 +596,7 @@ function send_data(client)
 	if #send_indicators > 0 then
 		send_indicators_json(client, send_indicators)
 	end
+	-- send_speed(client)
 end
 
 
