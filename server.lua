@@ -66,10 +66,12 @@ function LuaExportStart()
 end
 
 function LuaExportStop()
-  for _, client in pairs(clients) do
-    client:close()
-    clients[client] = nil
-  end
+  socket.protect(function()
+    for _, client in pairs(clients) do
+      socket.try(client:close())
+      clients[client] = nil
+    end
+  end)
   logmsg("DCS Master stopped")
   -- FIX: close logf
   if PrevExportStop then
@@ -414,7 +416,7 @@ function handle_subscribe(client, cmd)
 end
 
 -- client:
--- cmd: [ 3, indicator_id, indicator_name, id, { f=value }]
+-- cmd: [ 3, indicator_id, indicator_name, id]
 function handle_subscribe_indicator(client, cmd)
   if cmd[2] == nil then
     logmsg("No indicator ID given")
