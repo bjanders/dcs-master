@@ -301,7 +301,7 @@ function round(x, n)
 end
 
 
--- cmd: [2, device, command, value ]
+-- cmd: [1, device, command, value ]
 function handle_device(client, cmd)
   if #cmd ~= 4 then
     logmsg("Not enough values for command")
@@ -332,7 +332,7 @@ function handle_device(client, cmd)
     logmsg("Value must be withing the range [-1.0 1.0] inclusive")
     return
   end
-
+  logmsg("Setting "..device.."."..command.." to "..value)
   GetDevice(device):performClickableAction(command, value)
 end
 
@@ -355,10 +355,8 @@ function handle_subscribe(client, cmd)
     logmsg("No gauge argument found")
     return
   end
-  local gauge_name
-  if type(cmd[2]) == "number" then
-    gauge_name = cmd[2]
-  else
+  local gauge_name = tonumber(cmd[2])
+  if gauge_name == nil then
     gauge_name = cmd[2]:lower()
   end
   local gauge = gauge_defs[gauge_name]
@@ -416,7 +414,7 @@ function handle_subscribe(client, cmd)
 end
 
 -- client:
--- cmd: [ 3, indicator_id, indicator_name, id]
+-- cmd: [3, indicator_id, indicator_name, id]
 function handle_subscribe_indicator(client, cmd)
   if cmd[2] == nil then
     logmsg("No indicator ID given")
