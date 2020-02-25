@@ -184,7 +184,7 @@ Both _<precision>_ and _<maxfrequency>_ are optional, but to set _<maxfrequency>
 Format:
 [source]
 ----
-[2, <id>, <gaugevalue>]
+[2, [<id>, <gaugevalue>], [<id>, <gaugevalue>], ...]
 ----
 
 _Description will come._
@@ -242,7 +242,7 @@ The client subscribes to the output of the Hornet UFC scratchpad:
 
 [source]
 ----
-[3, 6, "UFC_ScratchPadNumberDisplay"]
+[3, 6, "UFC_ScratchPadNumberDisplay", 0]
 ----
 
 Now the player types on the 1, 2, 3, 4, 5, 6, 7 on the number pad of the UFC, which will
