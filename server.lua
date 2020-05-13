@@ -79,6 +79,15 @@ function LuaExportStop()
   end
 end
 
+function decode(s)
+  --return JSON:decode(s)
+  return string_split(s)
+end
+
+function encode(l)
+  return table.concat(l, " ").."\n"
+end
+
 function LuaExportBeforeNextFrame()
   local self = LoGetSelfData()
 
@@ -92,8 +101,10 @@ function LuaExportBeforeNextFrame()
     aircraft = self.Name
     logmsg("Current aircraft is "..self.Name)
     read_cockpit(aircraft)
+    local s = encode({"0", aircraft})
     for _, client in pairs(clients) do
-      send_to_client(client, "[0, \""..aircraft.."\"]\n")
+      -- send_to_client(client, "[0, \""..aircraft.."\"]\n")
+      send_to_client(client, s)
     end
     ready = true
   end
@@ -108,14 +119,14 @@ function LuaExportBeforeNextFrame()
         logmsg("Received: "..data)
         -- FIX: split on newline
         -- FIX: check length
-        local cmd = JSON:decode(data)
+        local cmd = decode(data)
         if #cmd == 0 or cmd == nil then
           logmsg("Data contains no command")
           break
         end
-        local arg1 = cmd[1]
+        local arg1 = tonumber(cmd[1])
         if type(arg1) ~= "number" then
-          logmsg("Command must be number")
+          logmsg("Command must be a number")
           break
         end
         if arg1 == CMD_DEV then
@@ -149,7 +160,8 @@ function LuaExportAfterNextFrame()
     client_socket:settimeout(0)
     client_socket:setoption("tcp-nodelay", true)
     if aircraft then
-      send_to_client(client, "[0, \""..aircraft.."\"]\n")
+      send_to_client(client, encode({"0", aircraft}))
+      -- send_to_client(client, "[0, \""..aircraft.."\"]\n")
     end
   end
   for k, client in pairs(clients) do
@@ -542,6 +554,14 @@ function send_json(client, gauges)
   send_to_client(client, s)
 end
 
+function send_text(client, gauges)
+  local s = ""
+  for _, gauge in pairs(gauges) do
+    local fmt = CMD_SUB.." %d %.5f %."..gauge.precission.."f\n"
+    s = s..fmt:format(gauge.id, gauge.raw_value, gauge.gauge_value)
+  end
+  send_to_client(client, s)
+end
 
 function send_indicators_json(client, indicators)
   local s = "["..CMD_SUBIND
@@ -551,6 +571,15 @@ function send_indicators_json(client, indicators)
   s = s.."]\n"
   send_to_client(client, s)
 end
+
+function send_indicators_text(client, indicators)
+  local s = ""
+  for _, ind in pairs(indicators) do
+    s = s..string.format(CMD_SUBIND.." %s %s\n", ind.id, ind.value)
+  end
+  send_to_client(client, s)
+end
+
 
 function send_speed(client)
   -- LoGetADIPitchBankYaw()   -- (args - 0, results - 3 (rad))
@@ -581,6 +610,7 @@ function send_data(client)
       input = round(interpolate(output, gauge.gauge.output, gauge.gauge.input), gauge.precission)
       if gauge.gauge_value ~= input then
         gauge.gauge_value = input
+        gauge.raw_value = output
         gauge.send_time = t
         send_gauges[#send_gauges+1] = gauge
       end
@@ -588,7 +618,8 @@ function send_data(client)
   end
   if #send_gauges > 0 then
     -- FIX: optional CBOR
-    send_json(client, send_gauges)
+    -- send_json(client, send_gauges)
+    send_text(client, send_gauges)
   end
   local send_indicators = {}
   for indicator_id, indicator_names in pairs(client.subscribed_indicators) do
@@ -610,7 +641,8 @@ function send_data(client)
     end
   end
   if #send_indicators > 0 then
-    send_indicators_json(client, send_indicators)
+    -- send_indicators_json(client, send_indicators)
+    send_indicators_text(client, send_indicators)
   end
   -- send_speed(client)
 end

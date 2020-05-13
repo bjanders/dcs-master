@@ -11,9 +11,11 @@ aims to achieve the following:
   machine readable format. This information is utilized as much as possible to avoid manual
   programming of the same information.
 * A simple to use network protocol that can easily be integrated with various client software.
-  This is achieved by sending all data as https://json.org[JSON]. If a more compact data format
+  This is achieved by sending all data as simple space separated text lines. Originally https://json.org[JSON] was used, but it
+  turned out that text lines was sufficient and even simpler. JSON and other formats can easily be enabled if needed.
+  If a more compact data format
   is needed, then support for http://cbor.io[CBOR] can easily be added, since JSON can be encoded
-  as CBOR.
+  as CBOR. Other compact formats could be used as well.
 * Avoid sending more data than needed. This is achieved by allowing the client to request which
   parameters should be exported, at what maximum frequency and with which precision (per gauge).
   Data is only
@@ -69,10 +71,10 @@ as floating point values between -1.0 and 1.0 inclusive.
 
 WARNING: The protocol is not fully finalized yet and changes may still occur.
 
-The protocol works by sending and receiving JSON arrays. The array must always be terminated by a new line character. This is to make parsing easier. The JSON arrays are exchanged over a TCP/IP session. By default the DCS master server plugin listens to port 4242, but this can changed in the LUA script. The first element of the JSON array is always the associated command defined by an integer. The general format is:
+The protocol works by sending and receiving space separated text lines terminated by a new line character. The lines are exchanged over a TCP/IP session. By default the DCS master server plugin listens to port 4242, but this can changed in the LUA script. The first element of the text line is always the associated command defined by an integer. The general format is:
 [source]
 ----
-[<command>, <arg1>, <arg2>, ...]
+<command> <arg1> <arg2> ... \n
 ----
 
 Five _commands_ are currently implemented:
@@ -93,14 +95,14 @@ Command 0 is automatically sent by the server to the client:
 The format of the command is:
 [source]
 ----
-[0, "<aircraft>"]
+0 <aircraft>
 ----
 The aircraft name is always as defined by DCS.
 
 For example, when the the F/A-18C is controlled, the following is sent by the server to the client:
-[source,json]
+[source]
 ----
-[0, "FA-18C_hornet"]
+0 FA-18C_hornet
 ----
 
 ===  Command 1: Control a device
@@ -109,7 +111,7 @@ With command 1 you control devices in the aircraft, like pushing a button, flick
 
 [source]
 ----
-[1, <device>, <command>, <value>]
+1 <device> <command> <value>
 ----
 Where:
 
@@ -127,23 +129,23 @@ The _value_ is always a floating point value between -1.0 and 1.0 inclusive. The
 
 To press and release the TCN button on the UFC in the F/A-18C, send:
 
-[source,json]
+[source]
 ----
-[1, "UFC", "FuncSwTCN", 1]
-[1, "UFC", "FuncSwTCN", 0]
+1 UFC FuncSwTCN 1
+1 UFC FuncSwTCN 0
 ----
 
 To increase the RADAR altimeter warning position on the right vertical panel in the F/A-18C, send:
 
-[source,json]
+[source]
 ----
-[1, "ID2163A", "ID2163A_SetMinAlt", 0.05]
+1 ID2163A ID2163A_SetMinAlt 0.05
 ----
 
 And to decrease it:
 [source,json]
 ----
-[1, "ID2163A", "ID2163A_SetMinAlt", -0.05]
+1 ID2163A ID2163A_SetMinAlt -0.05
 ----
 
 _Example of multi-position switch and other examples will be added._
@@ -163,7 +165,7 @@ Note that gauges are any kind of indicators that can be represented by a numeric
 The format of the command is:
 [source]
 ----
-[2, <gaugename>, <id>, <precision>, <maxfrequency>]
+2 <gaugename> <id> <precision> <maxfrequency>
 ----
 
 Where:
@@ -184,7 +186,7 @@ Both _<precision>_ and _<maxfrequency>_ are optional, but to set _<maxfrequency>
 Format:
 [source]
 ----
-[2, [<id>, <gaugevalue>], [<id>, <gaugevalue>], ...]
+2 <id> <rawvalue> <gaugevalue>
 ----
 
 _Description will come._
@@ -204,7 +206,7 @@ command 5, explained later.
 The format of the command is:
 [source]
 ----
-[3, <indicatornumber>, <indicatorname>, <id>]
+3 <indicatornumber> <indicatorname> <id>
 ----
 
 Where:
@@ -225,7 +227,7 @@ The _ID_ is an arbitrary integer number assigned by the client. This ID will be 
 The server will send to the client:
 [source]
 ----
-[3, [<id>, <indicatorstring>], [<id>, <indicatorstring>], ...]
+3 <id> <indicatorstring>
 ----
 
 Where:
@@ -242,7 +244,7 @@ The client subscribes to the output of the Hornet UFC scratchpad:
 
 [source]
 ----
-[3, 6, "UFC_ScratchPadNumberDisplay", 0]
+3 6 UFC_ScratchPadNumberDisplay 0
 ----
 
 Now the player types on the 1, 2, 3, 4, 5, 6, 7 on the number pad of the UFC, which will
@@ -250,14 +252,14 @@ show the number on the scratch pad. The following is sent by the server to the c
 
 [source]
 ----
-[3,[0,"       "]]
-[3,[0,"      1"]]
-[3,[0,"     12"]]
-[3,[0,"    123"]]
-[3,[0,"   1234"]]
-[3,[0,"  12345"]]
-[3,[0," 123456"]]
-[3,[0,"1234567"]]
+3 0        
+3 0       1
+3 0      12
+3 0     123
+3 0    1234
+3 0   12345
+3 0  123456
+3 0 1234567
 ----
 
 === Command 5: List all indicators
@@ -271,7 +273,7 @@ The format of the command is:
 
 [code]
 ----
-[5]
+4
 ----
 
 See the above example for the format that the server replies with.
